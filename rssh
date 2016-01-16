@@ -1,0 +1,163 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# rssh - route ssh through a series of hosts
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+# Usage: rssh [-h|--help]
+
+# Revision history:
+# 2015-11-11 Created (v0.1)
+# 2016-01-16 Modified license and uploaded to git for someone else to use. (v0.2)
+# ---------------------------------------------------------------------------
+
+PROGNAME=${0##*/}
+VERSION="0.2"
+
+clean_up() { # Perform pre-exit housekeeping
+  rm -f $conffile
+  return
+}
+
+error_exit() {
+  echo -e "${PROGNAME}: ${1:-"Unknown Error"}" >&2
+  clean_up
+  exit 1
+}
+
+graceful_exit() {
+  clean_up
+  exit
+}
+
+signal_exit() { # Handle trapped signals
+  case $1 in
+    INT)
+      error_exit "Program interrupted by user" ;;
+    TERM)
+      echo -e "\n$PROGNAME: Program terminated" >&2
+      graceful_exit ;;
+    *)
+      error_exit "$PROGNAME: Terminating on unknown signal" ;;
+  esac
+}
+
+usage() {
+  echo -e "Usage: $PROGNAME [-h|--help] [-v] [-s socks_port] sever1 server2 [server3] [server4 ....etc] [-c command]"
+}
+
+help_message() {
+  cat <<- _EOF_
+  $PROGNAME ver. $VERSION
+  route ssh through a series of hosts
+
+  $(usage)
+
+  Options:
+  -h, --help  Display this help message and exit.
+  -v          verbose output from ssh
+  -d          debug on
+  -D          debug off
+  -s nnnn     socks port
+  -c command  command to run on remote server
+
+  note: This script assumes that any hosts in your ~/.ssh/config file have a non-indented Host
+        line and the rest of the items related to that host are indented.
+
+_EOF_
+  return
+}
+
+# Trap signals
+trap "signal_exit TERM" TERM HUP
+trap "signal_exit INT"  INT
+
+# define variables
+hops=0
+declare -a host
+declare -a hostdata
+declare -a hostname
+declare -a port
+declare -a options
+conffile=$(mktemp)
+opt=""
+
+# Parse command-line
+while [[ -n $1 ]]; do
+  case $1 in
+    -h | --help)
+      help_message; graceful_exit ;;
+    -v)
+      opt="-v" ;;
+    -c | --command)
+      shift;command=$(echo $1) ;;
+    -d | --debug)
+      set -x ;;
+    -s | --socks)
+      shift;socks=$(echo $1) ;;
+    -D | --debug_off)
+      set +x ;;
+    -* | --*)
+      usage
+      error_exit "Unknown option $1" ;;
+    *)
+      ((hops++));
+      host[${hops}]=$1;
+      hostdata[${hops}]=$(sed -n "/Host.*${1}/,/^[ ]*$/p" ~/.ssh/config);
+      hostname[${hops}]=$(echo "${hostdata[${hops}]}" | grep -i "Hostname" | awk '{print $2}' );
+      x=${hostname[${hops}]:=${1}};
+      port[${hops}]=$(echo "${hostdata[${hops}]}" | grep -i "^[ ]*port" | awk '{print $2}' );
+      if [[ ${1} == *":"* ]]; then
+        hostname[${hops}]=$(echo $1 | awk -F: '{print $1}')
+        port[${hops}]=$(echo $1 | awk -F: '{print $2}')
+      fi
+      x=${port[${hops}]:=22};
+      options[${hops}]=$(echo "${hostdata[${hops}]}" | grep -iv "^[ ]*host" | grep -iv "^[ ]*port" | grep -iv "^[ ]*#"| grep -iv "^[ ]*DynamicForward");
+  esac
+  shift
+done
+
+if [ $hops -lt 1 ]; then
+  help_message
+  graceful_exit
+fi
+
+# Main logic
+
+i=${hops}
+while [ $i -gt 1 ]; do
+  echo "Host ${host[${i}]}" >> $conffile
+  echo " Port ${port[${i}]}" >> $conffile
+  echo "${options[${i}]}" >> $conffile
+  if [ ! -z "$socks" ] && [ $i -eq ${hops} ] ; then
+    echo " DynamicForward localhost:${socks}" >> $conffile
+  fi
+  echo " ProxyCommand ssh -F ${conffile} ${opt} ${host[${i}-1]} -W ${hostname[${i}]}:${port[${i}]}" >> $conffile
+  echo " " >> $conffile
+  let i=i-1
+done
+echo "Host ${host[${i}]}" >> $conffile
+echo " Hostname ${hostname[${i}]}" >> $conffile
+echo " Port ${port[${i}]}" >> $conffile
+echo "${options[${i}]}" >> $conffile
+echo " " >> $conffile
+
+sed -n "/^Host \*$/,/^$/p" ~/.ssh/config >> $conffile
+
+if [ "$opt" == "-v" ]; then
+  cat $conffile
+fi
+
+ssh ${opt} -F $conffile ${host[${hops}]} "$command"
+
+graceful_exit
+
