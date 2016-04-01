@@ -112,7 +112,7 @@ while [[ -n $1 ]]; do
     *)
       ((hops++));
       host[${hops}]=$1;
-      hostdata[${hops}]=$(sed -n "/Host.*${1}/,/^[ ]*$/p" ~/.ssh/config);
+      hostdata[${hops}]=$(sed -n "/Host.* ${1}\( \|$\)/,/^[ ]*$/p" ~/.ssh/config);
       hostname[${hops}]=$(echo "${hostdata[${hops}]}" | grep -i "Hostname" | awk '{print $2}' );
       x=${hostname[${hops}]:=${1}};
       port[${hops}]=$(echo "${hostdata[${hops}]}" | grep -i "^[ ]*port" | awk '{print $2}' );
@@ -121,7 +121,12 @@ while [[ -n $1 ]]; do
         port[${hops}]=$(echo $1 | awk -F: '{print $2}')
       fi
       x=${port[${hops}]:=22};
-      options[${hops}]=$(echo "${hostdata[${hops}]}" | grep -iv "^[ ]*host" | grep -iv "^[ ]*port" | grep -iv "^[ ]*#"| grep -iv "^[ ]*DynamicForward");
+      options[${hops}]=$(echo "${hostdata[${hops}]}" | \
+                        grep -iv "^[ ]*host" | \
+                        grep -iv "^[ ]*port" | \
+                        grep -iv "^[ ]*#"| \
+                        grep -iv "^[ ]*ProxyCommand"| \
+                        grep -iv "^[ ]*DynamicForward");
   esac
   shift
 done
