@@ -156,7 +156,7 @@ echo " Port ${port[${i}]}" >> $conffile
 echo "${options[${i}]}" >> $conffile
 echo " " >> $conffile
 
-sed -n "/^Host \*$/,/^$/p" ~/.ssh/config >> $conffile
+sed -n "/^Host \*\( \|$\)/,/^$/p" ~/.ssh/config >> $conffile
 
 if [ "$opt" == "-v" ]; then
   cat $conffile
