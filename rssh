@@ -4,8 +4,7 @@
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 2 of the License, or
-# (at your option) any later version.
+# the Free Software Foundation, version 3.
 
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -18,13 +17,14 @@
 # Revision history:
 # 2015-11-11 Created (v0.1)
 # 2016-01-16 Modified license and uploaded to git for someone else to use. (v0.2)
+# 2016-04-21 Incorporated sshrc copies your bashrc env to remote server (v0.3)
 # ---------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
-VERSION="0.2"
+VERSION="0.3"
 
 clean_up() { # Perform pre-exit housekeeping
-  rm -f $conffile
+  rm -f "$conffile"
   return
 }
 
@@ -49,6 +49,65 @@ signal_exit() { # Handle trapped signals
     *)
       error_exit "$PROGNAME: Terminating on unknown signal" ;;
   esac
+}
+
+sshrc() {
+    local SSHHOME=${SSHHOME:=~}
+    if [ -f "$SSHHOME/.sshrc" ]; then
+        local files=.sshrc
+        if [ -d "$SSHHOME/.sshrc.d" ]; then
+            files="$files .sshrc.d"
+        fi
+        SIZE=$(tar cz -h -C "$SSHHOME" $files | wc -c)
+        if [ "$SIZE" -gt 65536 ]; then
+            echo >&2 $'.sshrc.d and .sshrc files must be less than 64kb\ncurrent size: '"$SIZE"' bytes'
+            exit 1
+        fi
+        ssh -t "$@" "
+            command -v ${decodefn} >/dev/null 2>&1 || { echo >&2 \"sshrc requires ${decodefn} to be installed on the server, but it's not. Aborting.\"; exit 1; }
+            mydecode() { ${decodefn}; }
+            if [ -e /etc/motd ]; then cat /etc/motd; fi
+            if [ -e /etc/update-motd.d ]; then run-parts /etc/update-motd.d/ 2>/dev/null; fi
+            export SSHHOME=\$(mktemp -d -t .$(whoami).sshrc.XXXX)
+            export SSHRCCLEANUP=\$SSHHOME
+            trap \"rm -rf \$SSHRCCLEANUP; exit\" 0
+            echo \"$(${encodefn} < "$0")\" | mydecode > \$SSHHOME/sshrc
+            chmod +x \$SSHHOME/sshrc
+
+            echo \"$( cat <<- 'EOF' | ${encodefn}
+							if [ -r /etc/profile ]; then source /etc/profile; fi
+							if [ -r ~/.bash_profile ]; then source ~/.bash_profile
+							elif [ -r ~/.bash_login ]; then source ~/.bash_login
+							elif [ -r ~/.profile ]; then source ~/.profile
+							fi
+							export PATH=$PATH:${SSHHOME}:${SSHHOME}/.sshrc.d
+							source $SSHHOME/.sshrc;
+							EOF
+							)\" | mydecode > \$SSHHOME/sshrc.bashrc
+
+            echo \"$( cat <<- 'EOF' | ${encodefn}
+							#!/usr/bin/env bash
+							exec bash --rcfile <(echo '
+							[ -r /etc/profile ] && source /etc/profile
+							if [ -r ~/.bash_profile ]; then source ~/.bash_profile
+							elif [ -r ~/.bash_login ]; then source ~/.bash_login
+							elif [ -r ~/.profile ]; then source ~/.profile
+							fi
+							source '$SSHHOME'/.sshrc;
+							export PATH=$PATH:'$SSHHOME'
+							') "$@"
+							EOF
+							)\" | mydecode > \$SSHHOME/bashsshrc
+            chmod +x \$SSHHOME/bashsshrc
+
+            echo \"$(tar cz -h -C $SSHHOME $files | ${encodefn})\" | mydecode | tar mxz -C \$SSHHOME
+            export SSHHOME=\$SSHHOME
+            bash --rcfile \$SSHHOME/sshrc.bashrc
+            "
+    else
+        echo "No such file: $SSHHOME/.sshrc" >&2
+        exit 1
+    fi
 }
 
 usage() {
@@ -99,7 +158,7 @@ while [[ -n $1 ]]; do
     -v)
       opt="-v" ;;
     -c | --command)
-      shift;command=$(echo $1) ;;
+      shift;commandline=$(echo $1) ;;
     -d | --debug)
       set -x ;;
     -s | --socks)
@@ -140,29 +199,36 @@ fi
 
 i=${hops}
 while [ $i -gt 1 ]; do
-  echo "Host ${host[${i}]}" >> $conffile
-  echo " Port ${port[${i}]}" >> $conffile
-  echo "${options[${i}]}" >> $conffile
+  echo "Host ${host[${i}]}" >> "$conffile"
+  echo " Port ${port[${i}]}" >> "$conffile"
+  echo "${options[${i}]}" >> "$conffile"
   if [ ! -z "$socks" ] && [ $i -eq ${hops} ] ; then
-    echo " DynamicForward localhost:${socks}" >> $conffile
+    echo " DynamicForward localhost:${socks}" >> "$conffile"
   fi
-  echo " ProxyCommand ssh -F ${conffile} ${opt} ${host[${i}-1]} -W ${hostname[${i}]}:${port[${i}]}" >> $conffile
-  echo " " >> $conffile
+  echo " ProxyCommand ssh -F ${conffile} ${opt} ${host[${i}-1]} -W ${hostname[${i}]}:${port[${i}]}" >> "$conffile"
+  echo " " >> "$conffile"
   let i=i-1
 done
-echo "Host ${host[${i}]}" >> $conffile
-echo " Hostname ${hostname[${i}]}" >> $conffile
-echo " Port ${port[${i}]}" >> $conffile
-echo "${options[${i}]}" >> $conffile
-echo " " >> $conffile
+echo "Host ${host[${i}]}" >> "$conffile"
+echo " Hostname ${hostname[${i}]}" >> "$conffile"
+echo " Port ${port[${i}]}" >> "$conffile"
+echo "${options[${i}]}" >> "$conffile"
+echo " " >> "$conffile"
 
-sed -n "/^Host \*\( \|$\)/,/^$/p" ~/.ssh/config >> $conffile
+sed -n "/^Host \*\( \|$\)/,/^$/p" ~/.ssh/config >> "$conffile"
 
 if [ "$opt" == "-v" ]; then
-  cat $conffile
+  cat "$conffile"
 fi
 
-ssh ${opt} -F $conffile ${host[${hops}]} "$command"
+encodefn="openssl enc -base64"
+decodefn="openssl enc -d -base64"
+
+SSHHOME=${SSHHOME:=~}
+if [[ -f "$SSHHOME/.sshrc" && -z "$commandline" ]]; then
+  sshrc ${opt} -F $conffile ${host[${hops}]}
+else
+  ssh ${opt} -F $conffile ${host[${hops}]} "$commandline"
+fi
 
 graceful_exit
-
