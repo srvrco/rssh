@@ -18,10 +18,11 @@
 # 2015-11-11 Created (v0.1)
 # 2016-01-16 Modified license and uploaded to git for someone else to use. (v0.2)
 # 2016-04-21 Incorporated sshrc copies your bashrc env to remote server (v0.3)
+# 2016-05-20 updated sshrc and enabled direct use of ssh config if single hop (v0.4)
 # ---------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
-VERSION="0.3"
+VERSION="0.4"
 
 clean_up() { # Perform pre-exit housekeeping
   rm -f "$conffile"
@@ -52,29 +53,28 @@ signal_exit() { # Handle trapped signals
 }
 
 sshrc() {
-    local SSHHOME=${SSHHOME:=~}
-    if [ -f "$SSHHOME/.sshrc" ]; then
-        local files=.sshrc
-        if [ -d "$SSHHOME/.sshrc.d" ]; then
-            files="$files .sshrc.d"
-        fi
-        SIZE=$(tar cz -h -C "$SSHHOME" $files | wc -c)
-        if [ "$SIZE" -gt 65536 ]; then
-            echo >&2 $'.sshrc.d and .sshrc files must be less than 64kb\ncurrent size: '"$SIZE"' bytes'
-            exit 1
-        fi
-        ssh -t "$@" "
-            command -v ${decodefn} >/dev/null 2>&1 || { echo >&2 \"sshrc requires ${decodefn} to be installed on the server, but it's not. Aborting.\"; exit 1; }
-            mydecode() { ${decodefn}; }
-            if [ -e /etc/motd ]; then cat /etc/motd; fi
-            if [ -e /etc/update-motd.d ]; then run-parts /etc/update-motd.d/ 2>/dev/null; fi
-            export SSHHOME=\$(mktemp -d -t .$(whoami).sshrc.XXXX)
-            export SSHRCCLEANUP=\$SSHHOME
-            trap \"rm -rf \$SSHRCCLEANUP; exit\" 0
-            echo \"$(${encodefn} < "$0")\" | mydecode > \$SSHHOME/sshrc
-            chmod +x \$SSHHOME/sshrc
-
-            echo \"$( cat <<- 'EOF' | ${encodefn}
+  local SSHHOME=${SSHHOME:=~}
+  if [ -f "$SSHHOME/.sshrc" ]; then
+    local files=.sshrc
+    if [ -d "$SSHHOME/.sshrc.d" ]; then
+      files="$files .sshrc.d"
+    fi
+    SIZE=$(tar cz -h -C "$SSHHOME" $files | wc -c)
+    if [ "$SIZE" -gt 65536 ]; then
+      echo >&2 $'.sshrc.d and .sshrc files must be less than 64kb\ncurrent size: '"$SIZE"' bytes'
+      exit 1
+    fi
+    ssh -t "$@" "
+      command -v ${decodefn} >/dev/null 2>&1 || { echo >&2 \"sshrc requires ${decodefn} to be installed on the server, but it's not. Aborting.\"; exit 1; }
+      mydecode() { ${decodefn}; }
+      if [ -e /etc/motd ]; then cat /etc/motd; fi
+      if [ -e /etc/update-motd.d ]; then run-parts /etc/update-motd.d/ 2>/dev/null; fi
+      export SSHHOME=\$(mktemp -d -t .$(whoami).sshrc.XXXX)
+      export SSHRCCLEANUP=\$SSHHOME
+      trap \"rm -rf \$SSHRCCLEANUP; exit\" 0
+      echo \"$(${encodefn} < "$0")\" | mydecode > \$SSHHOME/sshrc
+      chmod +x \$SSHHOME/sshrc
+      echo \"$( cat <<- 'EOF' | ${encodefn}
 							if [ -r /etc/profile ]; then source /etc/profile; fi
 							if [ -r ~/.bash_profile ]; then source ~/.bash_profile
 							elif [ -r ~/.bash_login ]; then source ~/.bash_login
@@ -85,7 +85,7 @@ sshrc() {
 							EOF
 							)\" | mydecode > \$SSHHOME/sshrc.bashrc
 
-            echo \"$( cat <<- 'EOF' | ${encodefn}
+      echo \"$( cat <<- 'EOF' | ${encodefn}
 							#!/usr/bin/env bash
 							exec bash --rcfile <(echo '
 							[ -r /etc/profile ] && source /etc/profile
@@ -98,16 +98,15 @@ sshrc() {
 							') "$@"
 							EOF
 							)\" | mydecode > \$SSHHOME/bashsshrc
-            chmod +x \$SSHHOME/bashsshrc
-
-            echo \"$(tar cz -h -C $SSHHOME $files | ${encodefn})\" | mydecode | tar mxz -C \$SSHHOME
-            export SSHHOME=\$SSHHOME
-            bash --rcfile \$SSHHOME/sshrc.bashrc
-            "
-    else
-        echo "No such file: $SSHHOME/.sshrc" >&2
-        exit 1
-    fi
+      chmod +x \$SSHHOME/bashsshrc
+      echo \"$(tar cz -h -C $SSHHOME $files | ${encodefn})\" | mydecode | tar mxz -C \$SSHHOME
+      export SSHHOME=\$SSHHOME
+      bash --rcfile \$SSHHOME/sshrc.bashrc
+    "
+  else
+    echo "No such file: $SSHHOME/.sshrc" >&2
+    exit 1
+  fi
 }
 
 usage() {
@@ -224,11 +223,17 @@ fi
 encodefn="openssl enc -base64"
 decodefn="openssl enc -d -base64"
 
+if [ ${hops} -eq 1 ]; then
+  useconf=~/.ssh/config
+else
+  useconf="$conffile"
+fi
+
 SSHHOME=${SSHHOME:=~}
 if [[ -f "$SSHHOME/.sshrc" && -z "$commandline" ]]; then
-  sshrc ${opt} -F $conffile ${host[${hops}]}
+  sshrc ${opt} -F $useconf ${host[${hops}]}
 else
-  ssh ${opt} -F $conffile ${host[${hops}]} "$commandline"
+  ssh ${opt} -F $useconf ${host[${hops}]} "$commandline"
 fi
 
 graceful_exit
