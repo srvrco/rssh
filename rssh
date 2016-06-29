@@ -199,7 +199,7 @@ function sshrc() {
             elif [ -r ~/.bash_login ]; then source ~/.bash_login
             elif [ -r ~/.profile ]; then source ~/.profile
             fi
-            export PATH=$PATH:$SSHHOME
+            export PATH=$PATH:$SSHHOME:${SSHHOME}/.sshrc.d
             source $SSHHOME/.sshrc;
 EOF
             )"' | tr -s ' ' $'\n' | openssl enc -base64 -d > \$SSHHOME/sshrc.bashrc
