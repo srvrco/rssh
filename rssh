@@ -20,10 +20,11 @@
 # 2016-04-21 Incorporated sshrc copies your bashrc env to remote server (v0.3)
 # 2016-05-20 updated sshrc and enabled direct use of ssh config if single hop (v0.4)
 # 2016-06-29 Updated to allow user/ port on command line plus run commands (v0.5) 
+# 2016-06-20 Tidy code, and check with shellcheck (v0.6)
 # ---------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
-VERSION="0.5"
+VERSION="0.6"
 
 # define variables
 hops=0
@@ -60,12 +61,12 @@ add_hop() {
   l_user=""
   l_port=""
   if [[ $l_host == *"@"* ]]; then 
-    l_user=$(echo $l_host | awk -F@ '{print $1}')
-    l_host=$(echo $l_host | awk -F@ '{print $2}')
+    l_user=$(echo "$l_host" | awk -F@ '{print $1}')
+    l_host=$(echo "$l_host" | awk -F@ '{print $2}')
   fi
   if [[ $l_host == *":"* ]]; then 
-    l_port=$(echo $l_host | awk -F: '{print $2}')
-    l_host=$(echo $l_host | awk -F: '{print $1}')
+    l_port=$(echo "$l_host" | awk -F: '{print $2}')
+    l_host=$(echo "$l_host" | awk -F: '{print $1}')
   fi
   
   host[${hops}]=$l_host;
@@ -155,15 +156,17 @@ signal_exit() { # Handle trapped signals
 
 function sshrc() {
   local SSHHOME=${SSHHOME:=~}
-  if [ ! -f $SSHHOME/.sshrc ]; then
-      touch $SSHHOME/.sshrc
+  if [ ! -f "$SSHHOME/.sshrc" ]; then
+      touch "$SSHHOME/.sshrc"
   fi
   if [ ! -z "$commandline" ]; then
-    export SSHHOMETMP=$(mktemp -d -t .$(whoami).sshhome.XXXX)
+    export SSHHOMETMP
+    SSHHOMETMP=$(mktemp -d -t ".$(whoami).sshhome.XXXX")
+    # shellcheck disable=SC2064
     trap "rm -rf $SSHHOMETMP; exit" 0
-    cat $SSHHOME/.sshrc > $SSHHOMETMP/.sshrc
-    echo "$commandline && exit || exit" >> $SSHHOMETMP/.sshrc
-    ln -s $SSHHOME/.sshrc.d $SSHHOMETMP/.sshrc.d
+    cat "$SSHHOME/.sshrc" > "$SSHHOMETMP/.sshrc"
+    echo "$commandline && exit || exit" >> "$SSHHOMETMP/.sshrc"
+    ln -s "$SSHHOME/.sshrc.d" "$SSHHOMETMP/.sshrc.d"
     export SSHHOME=$SSHHOMETMP
     WELCOME_MESSAGE=""
     SSHRC_QUIET="-o LogLevel=QUIET"
@@ -177,47 +180,49 @@ function sshrc() {
     SSHRC_ACTIVATE_BIN="chmod +x \$SSHHOME/sshrc"
   fi
   local files=.sshrc
-  if [ -d $SSHHOME/.sshrc.d ]; then
+  if [ -d "$SSHHOME/.sshrc.d" ]; then
       files="$files .sshrc.d"
   fi
-  SIZE=$(tar cz -h -C $SSHHOME $files | wc -c)
-  if [ $SIZE -gt 65536 ]; then
-    echo >&2 $'.sshrc.d and .sshrc files must be less than 64kb\ncurrent size: '$SIZE' bytes'
+  # shellcheck disable=SC2086
+  SIZE=$(tar cz -h -C "$SSHHOME" $files | wc -c)
+  if [ "$SIZE" -gt 65536 ]; then
+    echo >&2 $'.sshrc.d and .sshrc files must be less than 64kb\ncurrent size: '"$SIZE"' bytes'
     exit 1
   fi
+  # shellcheck disable=SC2029,SC2002,SC2086
   ssh $SSHRC_QUIET -t "$@" "
     command -v openssl >/dev/null 2>&1 || { echo >&2 \"sshrc requires openssl to be installed on the server, but it's not. Aborting.\"; exit 1; }
     $WELCOME_MESSAGE
     export SSHHOME=\$(mktemp -d -t .$(whoami).sshrc.XXXX)
     export SSHRCCLEANUP=\$SSHHOME
     trap \"rm -rf \$SSHRCCLEANUP; exit\" 0
-    echo $'"$(cat "$0" | openssl enc -base64)"' | tr -s ' ' $'\n' | openssl enc -base64 -d > \$SSHHOME/sshrc
+    echo \"$(cat "$0" | openssl enc -base64)\" | openssl enc -base64 -d > \$SSHHOME/sshrc
     $SSHRC_ACTIVATE_BIN
-    echo $'"$( cat << 'EOF' | openssl enc -base64
-            if [ -r /etc/profile ]; then source /etc/profile; fi
-            if [ -r ~/.bash_profile ]; then source ~/.bash_profile
-            elif [ -r ~/.bash_login ]; then source ~/.bash_login
-            elif [ -r ~/.profile ]; then source ~/.profile
-            fi
-            export PATH=$PATH:$SSHHOME:${SSHHOME}/.sshrc.d
-            source $SSHHOME/.sshrc;
-EOF
-            )"' | tr -s ' ' $'\n' | openssl enc -base64 -d > \$SSHHOME/sshrc.bashrc
-    echo $'"$( cat << 'EOF' | openssl enc -base64
-            #!/usr/bin/env bash
-            exec bash --rcfile <(echo '
-            [ -r /etc/profile ] && source /etc/profile
-            if [ -r ~/.bash_profile ]; then source ~/.bash_profile
-            elif [ -r ~/.bash_login ]; then source ~/.bash_login
-            elif [ -r ~/.profile ]; then source ~/.profile
-            fi
-            source '$SSHHOME'/.sshrc;
-            export PATH=$PATH:'$SSHHOME'
-            ') "$@"
-EOF
-            )"' | tr -s ' ' $'\n' | openssl enc -base64 -d > \$SSHHOME/bashsshrc
+    echo \"$( cat <<- 'EOF' | openssl enc -base64
+			if [ -r /etc/profile ]; then source /etc/profile; fi
+			if [ -r ~/.bash_profile ]; then source ~/.bash_profile
+			elif [ -r ~/.bash_login ]; then source ~/.bash_login
+			elif [ -r ~/.profile ]; then source ~/.profile
+			fi
+			export PATH=$PATH:${SSHHOME}:${SSHHOME}/.sshrc.d
+			source $SSHHOME/.sshrc;
+			EOF
+			)\" | openssl enc -base64 -d > \$SSHHOME/sshrc.bashrc
+    echo \"$( cat <<- 'EOF' | openssl enc -base64
+			#!/usr/bin/env bash
+			exec bash --rcfile <(echo '
+			[ -r /etc/profile ] && source /etc/profile
+			if [ -r ~/.bash_profile ]; then source ~/.bash_profile
+			elif [ -r ~/.bash_login ]; then source ~/.bash_login
+			elif [ -r ~/.profile ]; then source ~/.profile
+			fi
+			source '$SSHHOME'/.sshrc;
+			export PATH=$PATH:'$SSHHOME'
+			') "$@"
+			EOF
+			)\" | openssl enc -base64 -d > \$SSHHOME/bashsshrc
     chmod +x \$SSHHOME/bashsshrc
-    echo $'"$(tar cz -h -C $SSHHOME $files | openssl enc -base64)"' | tr -s ' ' $'\n' | openssl enc -base64 -d | tar mxz -C \$SSHHOME
+    echo \"$(tar cz -h -C $SSHHOME $files | openssl enc -base64)\" | tr -s ' ' $'\n' | openssl enc -base64 -d | tar mxz -C \$SSHHOME
     export SSHHOME=\$SSHHOME
     bash --rcfile \$SSHHOME/sshrc.bashrc
     "
@@ -241,13 +246,13 @@ while [[ -n $1 ]]; do
     -v)
       opt="-v" ;;
     -c | --command)
-      shift;commandline=$(echo $1) ;;
+      shift;commandline=$1 ;;
     -d | --debug)
      _USE_DEBUG=1 ;;
     -id | --ignore-default)
       ignore_default_route=1 ;;
     -s | --socks)
-      shift;socks=$(echo $1) ;;
+      shift;socks=$1 ;;
     -* | --*)
       usage
       error_exit "Unknown option $1" ;;
@@ -270,44 +275,44 @@ if [ ! -z "$DEFAULT_SSH_ROUTE" ] && [ "$ignore_default_route" -eq "0" ]; then
   for h in ${DEFAULT_SSH_ROUTE}; do
     ((default_hops++))
     debug "adding default hop $h"
-    add_hop $h
+    add_hop "$h"
   done
 fi
 
 for h in ${host_list}; do
   debug "adding hop $h"
-  add_hop $h
+  add_hop "$h"
 done
 
 
-
-i=${hops}
-while [ $i -gt 1 ]; do
-  echo "Host ${host[${i}]}" >> "$conffile"
-  echo " Hostname ${hostname[${i}]}" >> "$conffile"
-  echo " Port ${port[${i}]}" >> "$conffile"
+{
+  i=${hops}
+  while [ $i -gt 1 ]; do
+    echo "Host ${host[${i}]}"
+    echo " Hostname ${hostname[${i}]}"
+    echo " Port ${port[${i}]}"
+    if [ ! -z "${user[$i]}" ] ; then
+      echo " User ${user[$i]}"
+    fi
+    if [ ! -z "${options[$i]}" ] ; then
+      echo "${options[${i}]}"
+    fi
+    if [ ! -z "$socks" ] && [ $i -eq ${hops} ] ; then
+      echo " DynamicForward localhost:${socks}"
+    fi
+    echo " ProxyCommand ssh -F ${conffile} ${opt} ${host[${i}-1]} -W ${hostname[${i}]}:${port[${i}]}"
+    echo " "
+    let i=i-1
+  done
+  echo "Host ${host[${i}]}"
+  echo " Hostname ${hostname[${i}]}"
+  echo " Port ${port[${i}]}"
   if [ ! -z "${user[$i]}" ] ; then
-    echo " User ${user[$i]}" >> "$conffile"
+    echo " User ${user[$i]}"
   fi
-  if [ ! -z "${options[$i]}" ] ; then
-    echo "${options[${i}]}" >> "$conffile"
-  fi
-  if [ ! -z "$socks" ] && [ $i -eq ${hops} ] ; then
-    echo " DynamicForward localhost:${socks}" >> "$conffile"
-  fi
-  echo " ProxyCommand ssh -F ${conffile} ${opt} ${host[${i}-1]} -W ${hostname[${i}]}:${port[${i}]}" >> "$conffile"
-  echo " " >> "$conffile"
-  let i=i-1
-done
-echo "Host ${host[${i}]}" >> "$conffile"
-echo " Hostname ${hostname[${i}]}" >> "$conffile"
-echo " Port ${port[${i}]}" >> "$conffile"
-if [ ! -z "${user[$i]}" ] ; then
-  echo " User ${user[$i]}" >> "$conffile"
-fi
-echo "${options[${i}]}" >> "$conffile"
-echo " " >> "$conffile"
-
+  echo "${options[${i}]}"
+  echo " "
+} >> "$conffile"
 sed -n "/^Host \*\( \|$\)/,/^$/p" ~/.ssh/config >> "$conffile"
 
 if [ ${_USE_DEBUG} -eq 1 ]; then
@@ -316,12 +321,12 @@ if [ ${_USE_DEBUG} -eq 1 ]; then
   debug ""
   cat "$conffile"
   debug ""
-  for (( i=1; i<=$hops; i++ )); do
+  for (( i=1; i<=hops; i++ )); do
     debug "hop $i is ${host[${i}]}"
   done
 fi
 
 debug "command: sshrc ${opt} -F $conffile ${host[${hops}]}"
-sshrc ${opt} -F $conffile ${host[${hops}]}
+sshrc ${opt} -F "$conffile" "${host[${hops}]}"
 
 graceful_exit
