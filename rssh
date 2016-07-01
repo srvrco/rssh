@@ -312,8 +312,8 @@ done
   fi
   echo "${options[${i}]}"
   echo " "
+  sed -n "/^Host \*\( \|$\)/,/^$/p" ~/.ssh/config | grep -v ProxyCommand
 } >> "$conffile"
-sed -n "/^Host \*\( \|$\)/,/^$/p" ~/.ssh/config >> "$conffile"
 
 if [ ${_USE_DEBUG} -eq 1 ]; then
   debug ""
