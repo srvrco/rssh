@@ -12,8 +12,6 @@
 # GNU General Public License at <http://www.gnu.org/licenses/> for
 # more details.
 
-# Usage: rssh [-h|--help]
-
 # Revision history:
 # 2015-11-11 Created (v0.1)
 # 2016-01-16 Modified license and uploaded to git for someone else to use. (v0.2)
@@ -161,7 +159,7 @@ function sshrc() {
   fi
   if [ ! -z "$commandline" ]; then
     export SSHHOMETMP
-    SSHHOMETMP=$(mktemp -d -t ".$(whoami).sshhome.XXXX")
+    SSHHOMETMP=$(mktemp -d -t ".$(whoami).sshhome.XXXXXX")
     # shellcheck disable=SC2064
     trap "rm -rf $SSHHOMETMP; exit" 0
     cat "$SSHHOME/.sshrc" > "$SSHHOMETMP/.sshrc"
@@ -193,7 +191,7 @@ function sshrc() {
   ssh $SSHRC_QUIET -t "$@" "
     command -v openssl >/dev/null 2>&1 || { echo >&2 \"sshrc requires openssl to be installed on the server, but it's not. Aborting.\"; exit 1; }
     $WELCOME_MESSAGE
-    export SSHHOME=\$(mktemp -d -t .$(whoami).sshrc.XXXX)
+    export SSHHOME=\$(mktemp -d -t .$(whoami).sshrc.XXXXXX)
     export SSHRCCLEANUP=\$SSHHOME
     trap \"rm -rf \$SSHRCCLEANUP; exit\" 0
     echo \"$(cat "$0" | openssl enc -base64)\" | openssl enc -base64 -d > \$SSHHOME/sshrc
@@ -208,20 +206,6 @@ function sshrc() {
 			source $SSHHOME/.sshrc;
 			EOF
 			)\" | openssl enc -base64 -d > \$SSHHOME/sshrc.bashrc
-    echo \"$( cat <<- 'EOF' | openssl enc -base64
-			#!/usr/bin/env bash
-			exec bash --rcfile <(echo '
-			[ -r /etc/profile ] && source /etc/profile
-			if [ -r ~/.bash_profile ]; then source ~/.bash_profile
-			elif [ -r ~/.bash_login ]; then source ~/.bash_login
-			elif [ -r ~/.profile ]; then source ~/.profile
-			fi
-			source '$SSHHOME'/.sshrc;
-			export PATH=$PATH:'$SSHHOME'
-			') "$@"
-			EOF
-			)\" | openssl enc -base64 -d > \$SSHHOME/bashsshrc
-    chmod +x \$SSHHOME/bashsshrc
     echo \"$(tar cz -h -C $SSHHOME $files | openssl enc -base64)\" | tr -s ' ' $'\n' | openssl enc -base64 -d | tar mxz -C \$SSHHOME
     export SSHHOME=\$SSHHOME
     bash --rcfile \$SSHHOME/sshrc.bashrc
