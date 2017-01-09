@@ -17,12 +17,13 @@
 # 2016-01-16 Modified license and uploaded to git for someone else to use. (v0.2)
 # 2016-04-21 Incorporated sshrc copies your bashrc env to remote server (v0.3)
 # 2016-05-20 updated sshrc and enabled direct use of ssh config if single hop (v0.4)
-# 2016-06-29 Updated to allow user/ port on command line plus run commands (v0.5) 
+# 2016-06-29 Updated to allow user/ port on command line plus run commands (v0.5)
 # 2016-06-20 Tidy code, and check with shellcheck (v0.6)
+# 2017-01-09 Tidy code, and check with latest shellcheck (v.07)
 # ---------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
-VERSION="0.6"
+VERSION="0.7"
 
 # define variables
 hops=0
@@ -36,6 +37,7 @@ declare -a options
 conffile=$(mktemp)
 ignore_default_route=0
 host_list=""
+use_ssh=0
 _USE_DEBUG=0
 opt=""
 
@@ -58,19 +60,19 @@ add_hop() {
   l_host=$1
   l_user=""
   l_port=""
-  if [[ $l_host == *"@"* ]]; then 
+  if [[ $l_host == *"@"* ]]; then
     l_user=$(echo "$l_host" | awk -F@ '{print $1}')
     l_host=$(echo "$l_host" | awk -F@ '{print $2}')
   fi
-  if [[ $l_host == *":"* ]]; then 
+  if [[ $l_host == *":"* ]]; then
     l_port=$(echo "$l_host" | awk -F: '{print $2}')
     l_host=$(echo "$l_host" | awk -F: '{print $1}')
   fi
-  
+
   host[${hops}]=$l_host;
   hostdata[${hops}]=$(sed -n "/Host.* ${l_host}\( \|$\)/,/^[ ]*$/p" ~/.ssh/config);
   # ignore dulicate hop of DEFAULT_SSH_ROUTE when connecting with "rssh $DEFAULT_SSH_ROUTE"
-  if [[ "$l_host" == "$DEFAULT_SSH_ROUTE" ]] && [[ $hops -eq $((default_hops+1)) ]]; then 
+  if [[ "$l_host" == "$DEFAULT_SSH_ROUTE" ]] && [[ $hops -eq $((default_hops+1)) ]]; then
     ((hops--))
     debug "ignoring hop $l_host as it is the default route anyway"
   else
@@ -100,8 +102,9 @@ add_hop() {
                     grep -iv "^[ ]*host" | \
                     grep -iv "^[ ]*port" | \
                     grep -iv "^[ ]*#"| \
-                    grep -iv "^[ ]*ProxyCommand"| \
-                    grep -iv "^[ ]*DynamicForward");
+                    grep -iv "^[ ]*ProxyCommand");
+#                    grep -iv "^[ ]*ProxyCommand"| \
+#                    grep -iv "^[ ]*DynamicForward");
   fi
 }
 
@@ -127,14 +130,15 @@ help_message() {
   -h, --help  Display this help message and exit.
   -v          verbose output from ssh
   -id         ignore default routing
+  -n          use plain ssh, with no copying of rc files
   -d          debug
   -s nnnn     socks port
   -c command  command to run on remote server
 
   note: This script assumes that any hosts in your ~/.ssh/config file have a non-indented Host
         line and the rest of the items related to that host are indented.
-        
-        The default routing is as defined by the variable DEFAULT_SSH_ROUTE  
+
+        The default routing is as defined by the variable DEFAULT_SSH_ROUTE
 
 _EOF_
   return
@@ -160,8 +164,7 @@ function sshrc() {
   if [ ! -z "$commandline" ]; then
     export SSHHOMETMP
     SSHHOMETMP=$(mktemp -d -t ".$(whoami).sshhome.XXXXXX")
-    # shellcheck disable=SC2064
-    trap "rm -rf $SSHHOMETMP; exit" 0
+    trap 'rm -rf $SSHHOMETMP; exit' 0
     cat "$SSHHOME/.sshrc" > "$SSHHOMETMP/.sshrc"
     echo "$commandline && exit || exit" >> "$SSHHOMETMP/.sshrc"
     ln -s "$SSHHOME/.sshrc.d" "$SSHHOMETMP/.sshrc.d"
@@ -213,7 +216,7 @@ function sshrc() {
 }
 
 usage() {
-  echo -e "Usage: $PROGNAME [-h|--help] [-v] [-id] [-s socks_port] sever1 server2 [server3] [server4 ....etc] [-c command]"
+  echo -e "Usage: $PROGNAME [-h|--help] [-v] [-id] [-n] [-s socks_port] sever1 server2 [server3] [server4 ....etc] [-c command]"
 }
 
 
@@ -235,6 +238,8 @@ while [[ -n $1 ]]; do
      _USE_DEBUG=1 ;;
     -id | --ignore-default)
       ignore_default_route=1 ;;
+    -n | --no-rc)
+      use_ssh=1 ;;
     -s | --socks)
       shift;socks=$1 ;;
     -* | --*)
@@ -311,6 +316,11 @@ if [ ${_USE_DEBUG} -eq 1 ]; then
 fi
 
 debug "command: sshrc ${opt} -F $conffile ${host[${hops}]}"
-sshrc ${opt} -F "$conffile" "${host[${hops}]}"
+if [ "$use_ssh" -eq 1 ]; then
+  # shellcheck disable=SC2029
+  ssh ${opt} -F "$conffile" "${host[${hops}]}"
+else
+  sshrc ${opt} -F "$conffile" "${host[${hops}]}"
+fi
 
 graceful_exit
