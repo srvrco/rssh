@@ -4,8 +4,7 @@ language: bash
 sudo: false
 
 script:
-  - shellcheck $(grep -rIzl '^#![[:blank:]]*/bin/sh' ./ | grep .git -v | cat)
-  - shellcheck $(grep -rIzl '^#![[:blank:]]*/bin/bash' ./ | grep .git -v | cat)
+  - shellcheck $(grep -rIzl '^#![[:blank:]]*/bin/"bash\|sh"' ./ | grep .git -v | cat)
 
 matrix:
   fast_finish: true
