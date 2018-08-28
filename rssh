@@ -21,10 +21,11 @@
 # 2016-06-20 Tidy code, and check with shellcheck (v0.6)
 # 2017-01-09 Tidy code, and check with latest shellcheck (v.07)
 # 2017-04-26 Allow proxycommand in config (0.8)
+# 2018-08-28 Adding -F parameter to define the ssh_config file
 # ---------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
-VERSION="0.8"
+VERSION="0.9"
 
 # define variables
 hops=0
@@ -34,6 +35,7 @@ declare -a hostname
 declare -a port
 declare -a user
 declare -a options
+cfile="${HOME}/.ssh/config"
 conffile=$(mktemp)
 ignore_default_route=0
 ignore_proxies=0
@@ -70,7 +72,7 @@ add_hop() {
     l_host=$(echo "$l_host" | awk -F: '{print $1}')
   fi
   host[${hops}]=$l_host;
-  hostdata[${hops}]=$(sed -n "/[Hh]ost.* ${l_host}\( \|$\)/,/^[ ]*$/p" ~/.ssh/config);
+  hostdata[${hops}]=$(sed -n "/[Hh]ost.* ${l_host}\( \|$\)/,/^[ ]*$/p" "${cfile}")
   hostname[${hops}]=$(echo "${hostdata[${hops}]}" | grep -i "Hostname" | awk '{print $2}' )
   hostname[${hops}]=${hostname[${hops}]:=${l_host}}
   f_port=$(echo "${hostdata[${hops}]}" | grep -i "^[ ]*port" | awk '{print $2}' )
@@ -107,6 +109,7 @@ help_message() {
   Options:
   -h, --help  Display this help message and exit.
   -v          verbose output from ssh
+  -f          ssh_config file
   -id         ignore default routing
   -ip         ignore proxies defined on config
   -n          use plain ssh, with no copying of rc files
@@ -114,7 +117,7 @@ help_message() {
   -s nnnn     socks port
   -c command  command to run on remote server
 
-  note: This script assumes that any hosts in your ~/.ssh/config file have a non-indented Host
+  note: This script assumes that any hosts in your ssh_config file have a non-indented Host
         line and the rest of the items related to that host are indented.
 
         The default routing is as defined by the variable DEFAULT_SSH_ROUTE
@@ -195,7 +198,7 @@ function sshrc() {
 }
 
 usage() {
-  echo -e "Usage: $PROGNAME [-h|--help] [-v] [-id] [-n] [-s socks_port] sever1 server2 [server3] [server4 ....etc] [-c command]"
+  echo -e "Usage: $PROGNAME [-h|--help] [-v] [-F file] [-id] [-n] [-s socks_port] sever1 server2 [server3] [server4 ....etc] [-c command]"
 }
 
 
@@ -215,6 +218,8 @@ while [[ -n $1 ]]; do
       shift;commandline=$1 ;;
     -d | --debug)
      _USE_DEBUG=1 ;;
+    -F | --file)
+      shift;cfile=$1 ;;
     -id | --ignore-default)
       ignore_default_route=1 ;;
     -ip | --ignore-proxies)
@@ -242,7 +247,7 @@ fi
 if [ ! -z "$DEFAULT_SSH_ROUTE" ] && [ "$ignore_default_route" -eq "0" ]; then
   first_default=$(echo "${DEFAULT_SSH_ROUTE}" | awk '{print $1}')
   first_hop=$(echo "${host_list}" | awk '{print $1}')
-  ignore_dr=$(sed -n "/[Hh]ost.* ${first_hop}\( \|$\)/,/^[ ]*$/p" ~/.ssh/config | grep -c "Ignore_DEFAULT_SSH_ROUTE");
+  ignore_dr=$(sed -n "/[Hh]ost.* ${first_hop}\( \|$\)/,/^[ ]*$/p" "${cfile}" | grep -c "Ignore_DEFAULT_SSH_ROUTE")
   if [[ "$first_default" == "$first_hop" ]]; then
     debug "ignoring default route as first hop is default route"
   elif [[ "$ignore_dr" -gt 0 ]]; then
@@ -259,7 +264,7 @@ fi
 
 for h in ${host_list}; do
   if [[ "$ignore_proxies" -eq 0 ]]; then
-    hdata=$(sed -n "/[Hh]ost.* ${h}\( \|$\)/,/^[ ]*$/p" ~/.ssh/config);
+    hdata=$(sed -n "/[Hh]ost.* ${h}\( \|$\)/,/^[ ]*$/p" "${cfile}")
     h_proxy=$(echo "${hdata}" | grep -i "^[ ]*ProxyCommand" | awk '{print $3}')
     if [[ "$h_proxy" == "-q" ]]; then
       h_proxy=$(echo "${hdata}" | grep -i "^[ ]*ProxyCommand" | awk '{print $4}')
@@ -301,7 +306,7 @@ done
   fi
   echo "${options[${i}]}"
   echo " "
-  sed -n "/^Host \*\( \|$\)/,/^$/p" ~/.ssh/config | grep -v ProxyCommand
+  sed -n "/^Host \*\( \|$\)/,/^$/p" "${cfile}" | grep -v ProxyCommand
 } >> "$conffile"
 
 if [ ${_USE_DEBUG} -eq 1 ]; then
